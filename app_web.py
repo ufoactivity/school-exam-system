@@ -63,7 +63,6 @@ with col_files:
 with col_opts:
     st.subheader("⚙️ 第二步：考場容量與分流設定")
     
-    # 這裡就是你提到的關鍵選項！
     zhiyong_cap = st.radio(
         "📍 致用樓4樓會議室 人數上限：",
         [136, 148],
@@ -72,7 +71,7 @@ with col_opts:
         help="選擇 136 人可免去搬動桌椅程序。"
     )
     
-    st.write("") # 間隔
+    st.write("") 
     
     separate_mode = st.toggle(
         "🔥 開啟【多科與單科嚴格分流】功能",
@@ -103,6 +102,11 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
 
                 LIBRARY_MAX = 98
                 COMPUTER_MAX = 37
+                
+                # 【修復關鍵】：把常數定義移到這裡，讓程式一開始就能記住它們！
+                grade_weight = {'一': 1, '二': 2, '三': 3}
+                loc_weight = {'致用樓四樓會議室': 1, '圖書館三樓自修教室': 2, '電腦教室401': 3}
+                current_targets = {"致用樓四樓會議室": zhiyong_cap, "圖書館三樓自修教室": LIBRARY_MAX, "電腦教室401": COMPUTER_MAX}
 
                 # --- 階段一：基本資料處理 ---
                 df_target['姓名'] = get_str_col(df_target, ['姓名', '學生姓名'])
@@ -181,6 +185,8 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
                 
                 df_grouped['NumSeat'] = pd.to_numeric(df_grouped['座號'], errors='coerce').fillna(999)
                 df_vld = df_grouped[df_grouped['地點'] != ""].copy()
+                
+                # 執行年級與場地權重排序
                 df_vld['G_W'] = df_vld['年級'].map(grade_weight).fillna(99)
                 df_vld['L_W'] = df_vld['地點'].map(loc_weight).fillna(99)
                 df_vld = df_vld.sort_values(by=['G_W', 'L_W', '個人考科', 'NumSeat', '班級'], ascending=[True, True, False, True, True])
@@ -198,7 +204,9 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
 
                 # --- 報表三處理 (考程) ---
                 df_exam_sh = df_target.drop_duplicates(subset=['學號', '試卷編號'], keep='first').copy()
-                df_rep3_final = df_exam_sh.sort_values(by=['年級', '班級', '科目簡稱', '場地', '座號']).fillna("")
+                # 確保報表三排序也順利
+                df_exam_sh['G_W'] = df_exam_sh['年級'].map(grade_weight).fillna(99)
+                df_rep3_final = df_exam_sh.sort_values(by=['G_W', '班級', '科目簡稱', '場地', '座號']).fillna("")
 
                 # --- 報表四處理 (印卷) ---
                 df_rep4 = df_target[df_target['試卷編號'] != ""].drop_duplicates(subset=['學號', '試卷編號']).groupby('試卷編號').size().reset_index(name='試卷數量')
@@ -209,7 +217,7 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
                 # 5. 下載區
                 # ==========================================
                 st.balloons()
-                st.success("🎊 處理成功！")
+                st.success("🎊 處理成功！所有的考場、動線、防弊座位皆已為您安排妥當！")
                 
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
@@ -220,10 +228,6 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
                     st.download_button("📝 下載：4.試卷印製表", to_excel_bytes(df_rep4), "報表四_試卷印製表.xlsx", "application/vnd.ms-excel", use_container_width=True)
 
             except Exception as e:
-                st.error("🚨 發生錯誤！請檢查檔案格式是否正確。")
-                st.expander("查看錯誤日誌").code(traceback.format_exc())
-
-# 常數定義
-grade_weight = {'一': 1, '二': 2, '三': 3}
-loc_weight = {'致用樓四樓會議室': 1, '圖書館三樓自修教室': 2, '電腦教室401': 3}
-current_targets = {"致用樓四樓會議室": zhiyong_cap, "圖書館三樓自修教室": 98, "電腦教室401": 37}
+                st.error("🚨 發生未預期錯誤，請檢查檔案格式是否正確。")
+                with st.expander("點此查看詳細工程錯誤碼"):
+                    st.code(traceback.format_exc())

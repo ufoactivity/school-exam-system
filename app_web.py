@@ -11,11 +11,13 @@ import traceback
 st.set_page_config(page_title="補考自動化神器-頂規網頁版", page_icon="🏫", layout="wide")
 
 st.title("🏫 試務組-全校補考自動化神器 (Web 終極大滿貫版)")
-st.info("💡 修正說明：已完美修復【報表三】的排版、監考教師、應到人數與空行分隔機制！")
+st.info("💡 修正說明：修復清除按鈕！現在按下清除，連同上傳的檔案也會一併完美清空！")
 
-# --- 初始化快取記憶體 ---
+# --- 初始化快取記憶體與清空鑰匙 ---
 if 'results' not in st.session_state:
     st.session_state['results'] = None
+if 'uploader_key' not in st.session_state:
+    st.session_state['uploader_key'] = 0
 
 # ==========================================
 # 2. 輔助功能定義
@@ -59,10 +61,11 @@ col_files, col_opts = st.columns([1, 1], gap="large")
 
 with col_files:
     st.subheader("📂 第一步：上傳原始資料")
-    file_target = st.file_uploader("1️⃣ 補考名單.xlsx", type=['xlsx'])
-    file_short = st.file_uploader("2️⃣ 科目簡稱.xlsx", type=['xlsx'])
-    file_exam = st.file_uploader("3️⃣ 科目對照表.xlsx", type=['xlsx'])
-    file_teacher = st.file_uploader("4️⃣ 監考教師及時間.xlsx", type=['xlsx'])
+    # 【修復關鍵】：加上 key，讓程式可以強制刷新這四個上傳區
+    file_target = st.file_uploader("1️⃣ 補考名單.xlsx", type=['xlsx'], key=f"f1_{st.session_state['uploader_key']}")
+    file_short = st.file_uploader("2️⃣ 科目簡稱.xlsx", type=['xlsx'], key=f"f2_{st.session_state['uploader_key']}")
+    file_exam = st.file_uploader("3️⃣ 科目對照表.xlsx", type=['xlsx'], key=f"f3_{st.session_state['uploader_key']}")
+    file_teacher = st.file_uploader("4️⃣ 監考教師及時間.xlsx", type=['xlsx'], key=f"f4_{st.session_state['uploader_key']}")
 
 with col_opts:
     st.subheader("⚙️ 第二步：考場容量與分流設定")
@@ -70,8 +73,12 @@ with col_opts:
     st.write("") 
     separate_mode = st.toggle("🔥 開啟【多科與單科嚴格分流】功能", value=False)
     
-    if st.button("🗑️ 清除舊資料/重新設定", use_container_width=True):
+    st.write("")
+    st.write("")
+    # 【修復關鍵】：按下清除時，讓鑰匙號碼 +1，網頁就會強制換上一組全新的、空的上傳區
+    if st.button("🗑️ 清除舊資料 / 重新設定", use_container_width=True):
         st.session_state['results'] = None
+        st.session_state['uploader_key'] += 1
         st.rerun()
 
 # ==========================================
@@ -100,6 +107,7 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
                 col_opencourse = get_str_col(df_target, ['開課班'])
                 col_homeroom = get_str_col(df_target, ['班級', '原班級'])
                 if col_opencourse.eq("").all(): col_opencourse = col_homeroom
+
                 df_target['學號'] = get_str_col(df_target, ['學號'])
                 df_target['座號'] = get_str_col(df_target, ['座號'])
                 df_target['科目'] = get_str_col(df_target, ['科目', '考科'])
@@ -146,7 +154,6 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
 
                 df_target['場地'] = df_target['學號'].map(venue_map).fillna("")
                 
-                # 監考
                 df_teacher['監考教師'] = get_str_col(df_teacher, ['監考教師', '監考老師', '教師姓名', '老師'])
                 df_teacher['場地'] = get_str_col(df_teacher, ['場地', '地點', '考場', '場點'])
                 df_teacher['比對年級'] = get_str_col(df_teacher, ['監考年級', '年級']).apply(grade_to_chinese)
@@ -187,7 +194,7 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
                     if col not in df_rep2.columns: df_rep2[col] = ""
                 df_rep2 = df_rep2[label_cols]
 
-                # --- 階段三：報表三處理 (考程點名表) 完美回歸 ---
+                # --- 階段三：報表三處理 (考程) ---
                 df_exam = df_target.drop_duplicates(subset=['學號', '試卷編號'], keep='first').copy()
 
                 if '試卷編號' in df_exam.columns:
@@ -223,7 +230,6 @@ if st.button("🚀 開始智慧排考運算", type="primary", use_container_widt
                 df_final_exam['G_W'] = df_final_exam['班級'].apply(grade_to_chinese).map(grade_weight).fillna(99)
                 df_final_exam = df_final_exam.sort_values(by=['G_W', '班級', '科目簡稱', '場地', '座號'])
 
-                # 插入空行來分組排版，讓報表好閱讀
                 df_final_exam['GroupKey'] = df_final_exam['班級'] + "_" + df_final_exam['科目簡稱'] + "_" + df_final_exam['場地']
                 grouped = [g for _, g in df_final_exam.groupby('GroupKey', sort=False)]
                 final_rows = []

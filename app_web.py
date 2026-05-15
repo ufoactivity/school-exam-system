@@ -12,8 +12,8 @@ from datetime import datetime
 # 1. 網頁頁面配置
 # ==========================================
 st.set_page_config(page_title="段考監考終極自動化", page_icon="🏫", layout="wide")
-st.title("🏫 試務組-段考監考全自動化系統 (暴力容錯版)")
-st.info("💡 終極更新：已啟動「超級模糊比對引擎」，能自動無視科目縮寫(如物理vs選修物理)、並自動清除所有隱藏空白與換行符號！")
+st.title("🏫 試務組-段考監考全自動化系統 (終極除錯版)")
+st.info("💡 終極更新：已修復日期錯亂 Bug！並加裝「表頭掃描雷達」與「超級模糊比對」，確保標籤資料極限填滿！")
 
 # --- 初始化狀態 ---
 if 'results' not in st.session_state:
@@ -38,7 +38,7 @@ def to_excel_bytes(df, header_df=None):
 
 # 【字串全面淨化器】
 def clean_str(s):
-    if pd.isna(s): return ""
+    if pd.isna(s) or s is None: return ""
     s = str(s).strip().replace('ㄧ', '一').replace(' ', '').replace('　', '').replace('\n', '').replace('\r', '')
     s = s.translate(str.maketrans('１２３４５６７８９０', '1234567890'))
     return s
@@ -52,21 +52,18 @@ def normalize_subject(s):
 
 # 【超級模糊尋找任課教師】
 def get_teacher_fuzzy(cls, subj, course_dict):
-    # 1. 完全精準命中
     if (cls, subj) in course_dict: return course_dict[(cls, subj)]
     
-    # 2. 拔除前綴後比對 (例如: 選修物理-力學一 -> 物理力學一)
     clean_target = subj.replace('選修', '').replace('彈性學習', '').replace('補強', '').replace('-', '')
     for (c, s), t in course_dict.items():
         if c == cls:
             s_clean = s.replace('選修', '').replace('彈性學習', '').replace('補強', '').replace('-', '')
             if clean_target in s_clean or s_clean in clean_target:
                 return t
-                
-    # 3. 超級模糊：只要前兩個字一樣就抓 (例如 物理 -> 選修物理)
-    if len(subj) >= 2:
+    
+    if len(clean_target) >= 2:
         for (c, s), t in course_dict.items():
-            if c == cls and subj[:2] in s:
+            if c == cls and clean_target[:2] in s:
                 return t
     return ""
 
@@ -122,7 +119,6 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
         st.error("🚨 請至少確認【1, 2, 3, 5】號基礎檔案皆已上傳！")
     else:
         try:
-            # --- 讀取基礎資料 ---
             df_quota = pd.read_excel(file_quota, sheet_name=selected_sheet).fillna("")
             quota_dict = dict(zip(df_quota.iloc[:, 0].astype(str).str.strip(), pd.to_numeric(df_quota.iloc[:, 1], errors='coerce').fillna(0)))
             
@@ -270,18 +266,29 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                     course_dict = {}
                     xls_course = pd.ExcelFile(file_course)
                     for sheet in xls_course.sheet_names:
-                        df_c = pd.read_excel(file_course, sheet_name=sheet).fillna("")
-                        for r_idx, row in df_c.iterrows():
+                        df_c = pd.read_excel(file_course, sheet_name=sheet, header=None).fillna("")
+                        
+                        # 找尋真實的表頭列 (防禦隱藏標題)
+                        h_idx = 0
+                        for r in range(min(5, len(df_c))):
+                            row_str = "".join(str(x) for x in df_c.iloc[r, :])
+                            if "科目" in row_str or "一1" in row_str or "二1" in row_str or "三1" in row_str:
+                                h_idx = r
+                                break
+                                
+                        classes_in_sheet = [clean_str(x) for x in df_c.iloc[h_idx, :]]
+                        
+                        for r_idx in range(h_idx + 1, len(df_c)):
+                            row = df_c.iloc[r_idx, :]
                             subj_raw = row.iloc[0]
                             if not subj_raw: continue
                             subj_norm = normalize_subject(subj_raw)
                             
-                            for c_idx in range(1, len(df_c.columns)):
-                                cls_raw = df_c.columns[c_idx]
+                            for c_idx in range(1, len(row)):
+                                cls_raw = classes_in_sheet[c_idx]
                                 teacher = clean_str(row.iloc[c_idx])
                                 if teacher and cls_raw:
-                                    cls_norm = clean_str(cls_raw)
-                                    course_dict[(cls_norm, subj_norm)] = teacher
+                                    course_dict[(cls_raw, subj_norm)] = teacher
                     
                     wb_label = openpyxl.load_workbook(file_label)
                     ws_label = wb_label.active
@@ -289,11 +296,11 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                     col_map = {}
                     for c in range(1, ws_label.max_column + 1):
                         val = clean_str(ws_label.cell(row=1, column=c).value)
-                        col_map[val] = c
+                        if val: col_map[val] = c
                     
-                    # 建立靈活的日期格式比對清單
-                    d1_fmts = [d1_date.strftime('%Y-%m-%d'), d1_date.strftime('%m-%d'), f"{d1_date.month}月{d1_date.day}日", f"{d1_date.month:02d}/{d1_date.day:02d}"]
-                    d2_fmts = [d2_date.strftime('%Y-%m-%d'), d2_date.strftime('%m-%d'), f"{d2_date.month}月{d2_date.day}日", f"{d2_date.month:02d}/{d2_date.day:02d}"]
+                    # 建立嚴格的日期比對機制 (完全不理會標籤中的其他奇特日期)
+                    d1_fmts = [d1_date.strftime('%Y-%m-%d'), d1_date.strftime('%Y/%m/%d'), d1_date.strftime('%m-%d'), d1_date.strftime('%m/%d')]
+                    d2_fmts = [d2_date.strftime('%Y-%m-%d'), d2_date.strftime('%Y/%m/%d'), d2_date.strftime('%m-%d'), d2_date.strftime('%m/%d')]
                     
                     def get_val(r, c_name):
                         if c_name not in col_map: return ""
@@ -303,11 +310,10 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                     for r in range(2, ws_label.max_row + 1):
                         cls_raw = get_val(r, '班級')
                         subj_raw = get_val(r, '科目')
-                        date_val = get_val(r, '日期')
+                        date_val = str(get_val(r, '日期'))
                         seq_val = get_val(r, '序號')
                         
                         if not cls_raw: continue
-                        
                         cls = clean_str(cls_raw)
                         subj = normalize_subject(subj_raw)
                         
@@ -317,13 +323,14 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                             if teacher:
                                 ws_label.cell(row=r, column=col_map['任課教師']).value = teacher
                         
-                        # 【填寫監考老師 - 精準座標】
+                        # 【填寫監考老師 - 嚴格日期定位】
                         try: p_val = int(float(seq_val))
                         except: p_val = -1
                         
                         if cls in assign_map and 1 <= p_val <= 5 and '監考老師' in col_map:
                             day_offset = -1
-                            # 判斷日期是第一天還是第二天
+                            
+                            # 只配對使用者設定的那兩天！
                             for fmt in d1_fmts:
                                 if fmt in date_val: day_offset = 0; break
                             if day_offset == -1:
@@ -347,8 +354,8 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                 'label': label_bytes
             }
             
-            # 給使用者的貼心提示
-            st.warning("⚠️ 溫馨提醒：若《標籤列印》中包含非您選擇的日期（例如標籤內有 05-13，但您設定考試為 05-14、05-15），則該日期的監考老師會合理保持空白喔！")
+            # 給使用者的防呆小提示
+            st.warning("⚠️ 若仍有少數空白，原因可能為：\n1. **日期非本次考試**：例如標籤內有 05-13，但系統只排 05-14/15，監考欄自然留白。\n2. **三年級班級**：《監考一覽表》內無三年級名單，故無法分發三年級監考老師。")
 
         except Exception as e:
             st.error(f"發生錯誤: {e}")

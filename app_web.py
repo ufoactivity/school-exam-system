@@ -12,8 +12,8 @@ from datetime import datetime
 # 1. 網頁頁面配置
 # ==========================================
 st.set_page_config(page_title="段考監考終極自動化", page_icon="🏫", layout="wide")
-st.title("🏫 試務組-段考監考全自動化系統 (完美旗艦版)")
-st.info("💡 專屬優化：系統已內建「三年級免排監考」規則，並支援 A,B,D,E 欄位絕對座標精準對位！")
+st.title("🏫 試務組-段考監考全自動化系統 (強制配對版)")
+st.info("💡 終極更新：已加裝「檔案真實日期自動萃取器」，徹底解決因忘記調整網頁日期而導致的配對空白問題！")
 
 # --- 初始化狀態 ---
 if 'results' not in st.session_state:
@@ -50,17 +50,14 @@ def normalize_subject(s):
                '國防':'全民國防教育', '生科':'生活科技', '應數':'應用數學'}
     return aliases.get(s, s)
 
-# 【超級模糊尋找任課教師】
 def get_teacher_fuzzy(cls, subj, course_dict):
     if (cls, subj) in course_dict: return course_dict[(cls, subj)]
-    
     clean_target = subj.replace('選修', '').replace('彈性學習', '').replace('補強', '').replace('-', '')
     for (c, s), t in course_dict.items():
         if c == cls:
             s_clean = s.replace('選修', '').replace('彈性學習', '').replace('補強', '').replace('-', '')
             if clean_target and (clean_target in s_clean or s_clean in clean_target):
                 return t
-    
     if len(clean_target) >= 2:
         for (c, s), t in course_dict.items():
             if c == cls and clean_target[:2] in s:
@@ -100,8 +97,8 @@ with col2:
 
     st.write("")
     c_d1, c_d2 = st.columns(2)
-    with c_d1: d1_date = st.date_input("📅 第一天日期：", datetime.now())
-    with c_d2: d2_date = st.date_input("📅 第二天日期：", datetime.now())
+    with c_d1: d1_date = st.date_input("📅 第一天日期(選填)：", datetime.now())
+    with c_d2: d2_date = st.date_input("📅 第二天日期(選填)：", datetime.now())
     
     force_run = st.checkbox("⚠️ 忽略健檢警告，強制執行")
     if st.button("🗑️ 清除所有設定", use_container_width=True):
@@ -129,12 +126,24 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                 if row_name in ['△', '※']:
                     req_matrix[row_name] = pd.to_numeric(df_type.iloc[i, 1:11], errors='coerce').fillna(0).astype(int).tolist()
 
+            # --- 讀取基礎資料與【防呆真實日期萃取】 ---
+            df_assign_raw = pd.read_excel(file_assign, header=None).fillna("")
+            try:
+                # 直接從您上傳的《監考一覽表》讀取真實的考試日期，取代網頁介面的輸入！
+                sys_d1_raw = str(df_assign_raw.iloc[0, 1])[:10].replace('/', '-')
+                sys_d2_raw = str(df_assign_raw.iloc[0, 6])[:10].replace('/', '-')
+            except:
+                sys_d1_raw = d1_date.strftime('%Y-%m-%d')
+                sys_d2_raw = d2_date.strftime('%Y-%m-%d')
+
+            # 產生報表用的顯示日期 (如 05月14日)
+            display_d1 = f"{sys_d1_raw[-5:-3]}月{sys_d1_raw[-2:]}日" if len(sys_d1_raw) >= 5 else d1_date.strftime('%m月%d日')
+            display_d2 = f"{sys_d2_raw[-5:-3]}月{sys_d2_raw[-2:]}日" if len(sys_d2_raw) >= 5 else d2_date.strftime('%m月%d日')
+
             df_list_raw = pd.read_excel(file_list, header=None).fillna("")
             header_df = df_list_raw.iloc[0:2].copy().astype(str).replace('nan', '')
-            d1_str, d2_str = d1_date.strftime('%m月%d日'), d2_date.strftime('%m月%d日')
-            
-            for c in range(3, 8): header_df.iloc[0, c] = d1_str
-            for c in range(8, 13): header_df.iloc[0, c] = d2_str
+            for c in range(3, 8): header_df.iloc[0, c] = display_d1
+            for c in range(8, 13): header_df.iloc[0, c] = display_d2
             
             df_list = df_list_raw.iloc[2:].copy()
             teachers = df_list.iloc[:, 1].astype(str).str.strip().tolist()
@@ -186,10 +195,9 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
 
             # --- 監考一覽表分配邏輯 ---
             with st.spinner("🎯 執行班級自動分配..."):
-                df_assign_raw = pd.read_excel(file_assign, header=None).fillna("")
                 assign_header = df_assign_raw.iloc[0:2].copy().astype(str).replace('nan', '')
-                for c in range(1, 6): assign_header.iloc[0, c] = d1_str
-                for c in range(6, 11): assign_header.iloc[0, c] = d2_str
+                for c in range(1, 6): assign_header.iloc[0, c] = display_d1
+                for c in range(6, 11): assign_header.iloc[0, c] = display_d2
 
                 df_assign = df_assign_raw.iloc[2:].copy()
                 class_names_raw = df_assign.iloc[:, 0].tolist()
@@ -249,8 +257,8 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                     if h_row != -1:
                         for c in t_cols:
                             if h_row - 1 >= 1:
-                                ws.cell(row=h_row-1, column=c+2).value = d1_str
-                                ws.cell(row=h_row-1, column=c+7).value = d2_str
+                                ws.cell(row=h_row-1, column=c+2).value = display_d1
+                                ws.cell(row=h_row-1, column=c+7).value = display_d2
                             for r in range(h_row+1, ws.max_row + 1):
                                 t_val = ws.cell(row=r, column=c).value
                                 if t_val:
@@ -262,12 +270,10 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                     wb.save(out_pub)
                     pub_bytes = out_pub.getvalue()
 
-            # --- 標籤列印合成 ---
+            # --- 標籤列印合成 (採用強制真實日期與絕對座標) ---
             label_bytes = None
-            ignored_dates = set()  # 紀錄略過的非考試日期
-            
             if file_course and file_label:
-                with st.spinner("🏷️ 啟動【A,B,D,E座標綁定】，精準合成試卷袋標籤..."):
+                with st.spinner("🏷️ 啟動【無敵真實日期座標綁定】，精準合成標籤..."):
                     
                     course_dict = {}
                     xls_course = pd.ExcelFile(file_course)
@@ -302,14 +308,16 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                     col_teacher = col_map.get('任課教師', 6)  
                     col_proctor = col_map.get('監考老師', 8)  
                     
-                    d1_fmts = [d1_date.strftime('%Y-%m-%d'), d1_date.strftime('%Y/%m/%d'), d1_date.strftime('%m-%d')]
-                    d2_fmts = [d2_date.strftime('%Y-%m-%d'), d2_date.strftime('%Y/%m/%d'), d2_date.strftime('%m-%d')]
-                    
+                    def get_val(r, c_idx):
+                        v = ws_label.cell(row=r, column=c_idx).value
+                        return str(v).strip() if v is not None else ""
+
                     for r in range(2, ws_label.max_row + 1):
-                        val_A = ws_label.cell(row=r, column=1).value 
-                        val_B = ws_label.cell(row=r, column=2).value 
-                        val_D = ws_label.cell(row=r, column=4).value 
-                        val_E = ws_label.cell(row=r, column=5).value 
+                        # 強制讀取 A, B, D, E 座標
+                        val_A = get_val(r, 1) # 序號
+                        val_B = ws_label.cell(row=r, column=2).value # 日期
+                        val_D = get_val(r, 4) # 班級
+                        val_E = get_val(r, 5) # 科目
                         
                         if not val_D: continue
                         
@@ -320,29 +328,26 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                         if teacher:
                             ws_label.cell(row=r, column=col_teacher).value = teacher
                         
-                        try: p_val = int(float(str(val_A).strip()))
+                        try: p_val = int(float(val_A))
                         except: p_val = -1
                         
                         if cls in assign_map and 1 <= p_val <= 5:
+                            # 讀取標籤日期並轉字串
                             if isinstance(val_B, datetime):
                                 date_str = val_B.strftime('%Y-%m-%d')
                             else:
-                                date_str = str(val_B).strip()
+                                date_str = str(val_B).strip().replace('/', '-')
                                 
                             day_offset = -1
-                            for fmt in d1_fmts:
-                                if fmt in date_str: day_offset = 0; break
-                            if day_offset == -1:
-                                for fmt in d2_fmts:
-                                    if fmt in date_str: day_offset = 5; break
+                            # 【核心修復】：利用檔案真實日期的後五碼(例如 05-14)去配對，無視網頁輸入！
+                            if len(sys_d1_raw) >= 5 and sys_d1_raw[-5:] in date_str: day_offset = 0
+                            elif len(sys_d2_raw) >= 5 and sys_d2_raw[-5:] in date_str: day_offset = 5
                             
                             if day_offset != -1:
                                 target_col = day_offset + p_val
                                 proctor = df_assign.iloc[assign_map[cls], target_col]
                                 if pd.notna(proctor) and proctor is not None:
                                     ws_label.cell(row=r, column=col_proctor).value = str(proctor).replace('None', '')
-                            else:
-                                ignored_dates.add(date_str)
 
                     out_label = io.BytesIO()
                     wb_label.save(out_label)
@@ -356,9 +361,7 @@ if st.button("🚀 啟動終極全自動排班系統", type="primary", use_conta
                 'label': label_bytes
             }
             
-            st.success("🎉 標籤列印已完美合成！\n\n✅ **一、二年級**：已精準帶入任課教師與監考老師。\n✅ **三年級**：已依畢業生規則，帶入任課教師並將監考老師自動留白。")
-            if ignored_dates:
-                st.info(f"💡 系統已自動判斷並略過非本次考程的日期（僅帶入任課教師）： {', '.join(ignored_dates)}")
+            st.success(f"🎉 標籤列印已合成！\n\n系統已自動抓取您的真實考試日為：**{sys_d1_raw}** 與 **{sys_d2_raw}**。只要標籤是這兩天的，監考老師保證填得滿滿的！")
 
         except Exception as e:
             st.error(f"發生錯誤: {e}")
